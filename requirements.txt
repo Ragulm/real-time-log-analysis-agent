@@ -1,0 +1,4 @@
+temporalio
+python-dotenv
+groq
+aiofiles

@@ -1,137 +1,202 @@
-# Real-Time Log Analysis Agent
+# 🚀 Temporal Log Monitoring Workflow
 
-A real-time, multi-agent AI system built in Python using LangGraph and Groq.  
-The system continuously monitors application logs, detects critical issues, analyzes them using LLMs, and sends automated email notifications with actionable remediation steps.
+A real-time log monitoring system implemented using **Temporal Workflows** to provide reliable orchestration, automatic retries, and full execution visibility for log analysis and alerting.
 
----
-
-## 🚀 Features
-
-- **Real-Time Monitoring**  
-  Continuously tails the application log file and processes new entries instantly.
-
-- **Intelligent Analysis**  
-  Uses `llama-3.1-8b-instant` to efficiently filter and identify ERROR and CRITICAL log events.
-
-- **Root Cause Explanation**  
-  Uses `llama-3.3-70b-versatile` to generate detailed explanations and potential fixes for detected issues.
-
-- **Automated Alerts**  
-  Sends email notifications with severity levels, issue details, and suggested fixes via SMTP.
-
-- **Simulated Environment**  
-  Includes a log generator to simulate user traffic and random system failures for testing.
+This project demonstrates how a traditional async-based monitoring system can be upgraded into a **durable, fault-tolerant workflow architecture**.
 
 ---
 
-## 🛠️ Architecture
+## 📌 Overview
 
-The system follows a multi-agent workflow inspired by LangGraph:
+The system continuously monitors application logs and triggers a Temporal workflow whenever a critical error is detected.
 
-1. Collector Agent – Reads new log lines in real time  
-2. Analyzer Agent – Determines whether a log entry represents a real issue using an LLM  
-3. Explainer Agent – Generates root-cause explanations and corrective actions  
-4. Notifier Agent – Sends real-time email alerts  
+Each workflow execution performs:
+
+1. Log analysis  
+2. Root cause explanation using LLM  
+3. Alert notification via email  
+
+Temporal ensures reliability even if workers crash or restart.
+
+---
+
+## 🧠 Architecture Flow
 
 ```
-Log File
-   ↓
-Collector
-   ↓
-Analyzer (Groq LLM)
-   ↓
-Explainer (Groq LLM)
-   ↓
-Email Notifier (SMTP)
+generate_logs.py
+        ↓
+app.log
+        ↓
+stream_client.py
+        ↓
+Temporal Client
+        ↓
+Temporal Workflow
+        ↓
+Analyzer → Explainer → Notifier
 ```
 
 ---
 
-## 📋 Prerequisites
+## ⚙️ Tech Stack
 
-- Python 3.8+
-- Groq API Key
-- Gmail App Password (for email alerts)
+- Python 3.10+
+- Temporal (Docker)
+- Temporal Python SDK
+- Groq LLM
+- Async Programming
+- Docker & Docker Compose
 
 ---
 
-## ⚙️ Installation
+## 📂 Project Structure
 
-### Clone the repository
+```
+realtime_agent/
+│
+├── README.md                         # Main documentation (Temporal version)
+│
+├── docs/
+│   ├── OLD_README.md                 # Old project documentation
+│   └── TEST_REPORT.md                # Previous test report
+│
+├── main.py                           # Initial non-Temporal implementation (reference)
+│
+├── temporal_app/
+│   ├── __init__.py
+│   ├── workflow.py                   # Temporal workflow orchestration
+│   ├── activities.py                 # Analyzer, Explainer, Notifier activities
+│   ├── worker.py                     # Temporal worker
+│   ├── client.py                     # Workflow starter
+│   └── stream_client.py              # Watches logs & triggers workflows
+│
+├── agents/
+│   ├── __init__.py
+│   ├── collector.py                  # Log file watcher
+│   ├── analyzer.py                   # Issue classification
+│   ├── explainer.py                  # LLM-based explanation
+│   └── notifier.py                   # Email notification
+│
+├── generate_logs.py                  # Log generator
+├── config.py                         # Environment configuration
+├── docker-compose.yml                # Temporal server setup
+├── requirements.txt
+└── .gitignore
+```
+
+---
+
+## ▶️ How to Run (Correct Order)
+
+### 1️⃣ Start Temporal Server
+
 ```bash
-git clone <repository-url>
-cd realtime_agent
+docker-compose up
 ```
 
-### Install dependencies
-```bash
-pip install langchain-groq langgraph python-dotenv pydantic
+Check Temporal UI:
+
 ```
-
-### Configure environment variables
-
-Create a `.env` file in the project root:
-
-```env
-GROQ_API_KEY=your_groq_api_key
-LOG_FILE_PATH=app.log
-
-# Email Configuration
-SENDER_EMAIL=your_email@gmail.com
-SENDER_PASSWORD=your_app_password
-RECIPIENT_EMAIL=recipient@example.com
-SMTP_SERVER=smtp.gmail.com
-SMTP_PORT=587
+http://localhost:8233
 ```
 
 ---
 
-## 🏃 Usage
+### 2️⃣ Start Temporal Worker
 
-### Terminal 1 – Start the log generator
+```bash
+python -m temporal_app.worker
+```
+
+Keep this terminal running.
+
+---
+
+### 3️⃣ Start Log Generator
+
 ```bash
 python generate_logs.py
 ```
 
-### Terminal 2 – Start the agent system
+This continuously writes logs into `app.log`.
+
+---
+
+### 4️⃣ Start Stream Client
+
 ```bash
-python main.py
+python -m temporal_app.stream_client
 ```
 
+This watches the log file and triggers Temporal workflows for error logs.
+
 ---
 
-## 📁 Project Structure
+### 5️⃣ Observe Results
+
+- New workflows appear in Temporal UI
+- Activity execution timeline is visible
+- Retry attempts are recorded
+- Email notifications are triggered
+
+---
+
+## 🔄 Retry Policy
+
+Temporal RetryPolicy automatically handles transient failures such as:
+
+- SMTP errors
+- Network instability
+- Temporary API failures
+
+Retries occur without manual loops or custom logic.
+
+---
+
+## 🖥️ Temporal UI
+
+Access Temporal UI at:
 
 ```
-realtime_agent/
-├── main.py
-├── generate_logs.py
-├── config.py
-├── app.log
-└── agents/
-    ├── collector.py
-    ├── analyzer.py
-    ├── explainer.py
-    └── notifier.py
+http://localhost:8233
 ```
 
----
+Features:
 
-## ✅ Project Status
-
-✔ Completed  
-✔ Tested with simulated logs  
-✔ Production-logic ready  
-
----
-
-## 🧠 Summary
-
-This project demonstrates a real-time, multi-agent log monitoring system that reduces false alerts using LLM reasoning and enables faster incident response through automated email notifications.
+- Workflow execution history
+- Activity timelines
+- Retry attempts
+- Failure diagnostics
 
 ---
 
-## 👤 Author
+## 📘 Documentation Note
 
-Ragul  
-Python Developer | LLM & Multi-Agent Systems
+- `main.py` is kept for reference (non-Temporal version).
+- Active production logic uses Temporal workflows.
+- Previous documentation is preserved under the `docs/` directory.
+
+---
+
+## ✅ Key Benefits
+
+| Traditional Approach | Temporal Workflow |
+|---------------------|-------------------|
+| Infinite loops | Durable workflows |
+| Manual retry logic | Built-in retries |
+| Crash = data loss | Automatic recovery |
+| No observability | Full execution history |
+| Hard debugging | Timeline-based debugging |
+
+---
+
+## 🎯 Learning Outcomes
+
+- Temporal workflow orchestration
+- Activity-based backend design
+- Retry & timeout handling
+- Event-driven systems
+- LLM integration
+- Production-grade reliability patterns
+
+---

@@ -1,17 +1,15 @@
 import time
 import random
 import logging
-from datetime import datetime
+from config import LOG_FILE_PATH
 
-# Configure logging to write to a file
+# Configure logging to write to the SAME log file
 logging.basicConfig(
-    filename='app.log',
+    filename=LOG_FILE_PATH,
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-# List of simulated actions and errors
 ACTIONS = [
     "User login successful",
     "Dashboard data loaded",
@@ -29,22 +27,21 @@ ERRORS = [
     "Disk space low (95%)"
 ]
 
-print("Starting log generator... Writing to app.log")
+print("🚀 Starting log generator...")
+print(f"📝 Writing logs to: {LOG_FILE_PATH}")
 print("Press Ctrl+C to stop.")
 
 try:
     while True:
-        # 80% chance of normal action, 20% chance of error
         if random.random() < 0.8:
             action = random.choice(ACTIONS)
-            logging.info(f"Action: {action} | Duration: {random.randint(10, 500)}ms")
-            print(f"Logged INFO: {action}")
+            logging.info(f"Action: {action}")
+            print(f"INFO: {action}")
         else:
             error = random.choice(ERRORS)
-            logging.error(f"CRITICAL FAILURE: {error} | Trace ID: {random.randint(1000,9999)}")
-            print(f"Logged ERROR: {error}")
-        
-        # specific delay to simulate real-time traffic (0.5 to 2 seconds)
+            logging.error(f"CRITICAL FAILURE: {error}")
+            print(f"ERROR: {error}")
+
         time.sleep(random.uniform(0.5, 2.0))
 
 except KeyboardInterrupt:
