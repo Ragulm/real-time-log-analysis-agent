@@ -132,12 +132,81 @@ This watches the log file and triggers Temporal workflows for error logs.
 
 ---
 
-### 5️⃣ Observe Results
+## 🐳 Docker & Google Cloud Run (quick guide)
+
+This repository did not previously include an application image — it only provided Docker Compose for Temporal itself. Added a multi-role `Dockerfile` so you can run the **worker**, **streamer**, or **log generator** from a single image.
+
+- Default role: `worker` (set `ROLE` to `streamer` or `generator` to change behavior)
+- Location of entrypoint: `docker/entrypoint.sh`
+
+Build & run locally (example):
+
+```bash
+# build
+docker build -t realtime-agent:latest .
+
+# run worker (default)
+docker run --rm realtime-agent:latest
+
+# run streamer
+docker run --rm -e ROLE=streamer realtime-agent:latest
+```
+
+Deploy to Cloud Run (recommended: deploy the `worker` as a Cloud Run **service** or use **Cloud Run Jobs** for batch runs):
+
+```bash
+# build and push to Google Container Registry or Artifact Registry
+docker build -t gcr.io/PROJECT-ID/realtime-agent:latest .
+docker push gcr.io/PROJECT-ID/realtime-agent:latest
+
+# deploy worker to Cloud Run (set min-instances > 0 if you need always-on)
+gcloud run deploy realtime-agent-worker \
+  --image gcr.io/PROJECT-ID/realtime-agent:latest \
+  --region=REGION \
+  --platform=managed \
+  --set-env-vars=ROLE=worker \
+  --concurrency=1 \
+  --memory=512Mi
+
+# OR deploy streamer as a separate service
+gcloud run deploy realtime-agent-streamer \
+  --image gcr.io/PROJECT-ID/realtime-agent:latest \
+  --set-env-vars=ROLE=streamer
+```
+
+Notes:
+- Cloud Run is request-driven; for long-running workers consider Cloud Run Jobs or set `min-instances` to keep a worker warm.
+- Ensure your Cloud Run service can reach your Temporal server (VPC connector or deploy Temporal in same project / network).
+
+---
+
+### 5️⃣ Start the API Server (Optional)
+
+```bash
+python -m api
+```
+
+This hosts an interactive dashboard at:
+
+```
+http://localhost:8000/dashboard
+```
+
+The API also provides:
+- `/api/v1/analyze-log` — POST endpoint to trigger log analysis
+- `/api/v1/workflow/{workflow_id}` — GET workflow results
+- `/api/v1/batch-analyze` — Analyze multiple logs
+- `/health` — Health check endpoint
+
+---
+
+### 6️⃣ Observe Results
 
 - New workflows appear in Temporal UI
 - Activity execution timeline is visible
 - Retry attempts are recorded
 - Email notifications are triggered
+- (If API running) Dashboard updates in real-time
 
 ---
 
@@ -153,9 +222,11 @@ Retries occur without manual loops or custom logic.
 
 ---
 
-## 🖥️ Temporal UI
+## 🖥️ Web Interfaces
 
-Access Temporal UI at:
+### Temporal UI
+
+Access Temporal Workflow Dashboard:
 
 ```
 http://localhost:8233
@@ -167,6 +238,21 @@ Features:
 - Activity timelines
 - Retry attempts
 - Failure diagnostics
+
+### Application Dashboard
+
+Access the Real-Time Log Analysis Dashboard (when API is running):
+
+```
+http://localhost:8000/dashboard
+```
+
+Features:
+
+- Interactive UI to submit logs for analysis
+- Real-time workflow status
+- Analysis results and explanations
+- Error tracking and notifications
 
 ---
 

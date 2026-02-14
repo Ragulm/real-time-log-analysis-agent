@@ -1,3 +1,4 @@
+import os
 import asyncio
 from temporalio.client import Client
 
@@ -6,10 +7,22 @@ from config import LOG_FILE_PATH
 from temporal_app.workflow import LogWorkflow
 
 
+async def connect_with_retry(address: str, retries: int = 20, delay: float = 2.0):
+    import asyncio
+    for attempt in range(1, retries + 1):
+        try:
+            return await Client.connect(address)
+        except Exception as exc:
+            print(f"Temporal not ready ({exc}) — retry {attempt}/{retries} in {delay}s")
+            if attempt == retries:
+                raise
+            await asyncio.sleep(delay)
+
+
 async def main():
     print("📡 Watching logs and triggering Temporal workflows...")
 
-    client = await Client.connect("localhost:7233")
+    client = await connect_with_retry(os.getenv("TEMPORAL_ADDRESS", "localhost:7233"))
 
     collector = LogCollector(LOG_FILE_PATH)
 
