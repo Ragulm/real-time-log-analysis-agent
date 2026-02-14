@@ -2,3 +2,5 @@ temporalio
 python-dotenv
 groq
 aiofiles
+fastapi
+uvicorn[standard]
