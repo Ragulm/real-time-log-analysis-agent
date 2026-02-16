@@ -1,6 +1,6 @@
-temporalio
-python-dotenv
-groq
-aiofiles
-fastapi
-uvicorn[standard]
+temporalio==1.22.0
+python-dotenv==1.2.1
+groq==1.0.0
+aiofiles==25.1.0
+fastapi==0.129.0
+uvicorn[standard]==0.40.0

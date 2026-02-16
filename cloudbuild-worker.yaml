@@ -1,0 +1,51 @@
+# Simplified Cloud Build configuration for worker image only
+# Builds and pushes the worker image to Artifact Registry and deploys to Cloud Run
+# Usage: gcloud builds submit --config=cloudbuild-worker.yaml
+
+steps:
+  # Step 1: Build the worker image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-worker
+    args:
+      - 'build'
+      - '--no-cache'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:worker-$BUILD_ID'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:worker-latest'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+
+  # Step 2: Push the worker image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-worker
+    args:
+      - 'push'
+      - '--all-tags'
+      - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent'
+    waitFor: ['build-worker']
+
+  # Step 3: Deploy worker to Cloud Run
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: deploy-worker
+    args:
+      - 'run'
+      - 'deploy'
+      - 'realtime-agent-worker'
+      - '--image=us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:worker-$BUILD_ID'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--no-allow-unauthenticated'
+      - '--set-env-vars=ROLE=worker,TEMPORAL_ADDRESS=temporal.example.com:7233'
+    waitFor: ['push-worker']
+
+images:
+  - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:worker-$BUILD_ID'
+  - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:worker-latest'
+
+options:
+  machineType: 'N1_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: '1800s'

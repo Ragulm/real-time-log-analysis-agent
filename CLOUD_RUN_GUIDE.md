@@ -83,7 +83,14 @@ gcloud artifacts repositories create $ARTIFACT_REPO \
 ```bash
 gcloud auth configure-docker ${REGION}-docker.pkg.dev
 ```
+---
 
+### CI smoke tests (Cloud Build)
+The provided `cloudbuild.yaml` now includes **smoke test steps** that run after deployment:
+- `/health/groq` probe — verifies Groq SDK auth & connectivity.
+- A lightweight workflow trigger + poll — verifies the API → Temporal → Worker path.
+
+These steps run automatically when you run `gcloud builds submit --config=cloudbuild.yaml` and will fail the build if the smoke checks do not pass.
 ### Step 5: Build Docker image
 ```bash
 docker build -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${IMAGE_NAME}:latest .
@@ -99,8 +106,15 @@ docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${IMAGE_NAME
 # Create GROQ_API_KEY secret
 echo -n "your-groq-api-key" | gcloud secrets create groq-api-key --data-file=-
 
+# (Optional) Create SMTP password secret for EmailNotifier
+echo -n "your-smtp-password" | gcloud secrets create sender-email-password --data-file=-
+
 # Grant Cloud Run service account access to secrets
 gcloud secrets add-iam-policy-binding groq-api-key \
+    --member=serviceAccount:PROJECT_ID@appspot.gserviceaccount.com \
+    --role=roles/secretmanager.secretAccessor
+
+gcloud secrets add-iam-policy-binding sender-email-password \
     --member=serviceAccount:PROJECT_ID@appspot.gserviceaccount.com \
     --role=roles/secretmanager.secretAccessor
 ```
@@ -121,6 +135,19 @@ gcloud run deploy realtime-agent-api \
     --concurrency=80
 ```
 
+Optional environment variables to tune Groq calls (defaults already chosen in code):
+- `GROQ_CALL_TIMEOUT` — per-call timeout in seconds (default: 8)
+- `GROQ_CALL_RETRIES` — local retry attempts on transient network failures (default: 1)
+
+Example with tuning:
+```bash
+gcloud run deploy realtime-agent-api \
+  --image=... \
+  --region=$REGION \
+  --set-env-vars="ROLE=api,TEMPORAL_ADDRESS=...,GROQ_CALL_TIMEOUT=6,GROQ_CALL_RETRIES=2" \
+  --set-secrets="GROQ_API_KEY=groq-api-key:latest"
+```
+
 ### Step 9: Deploy Worker Service (background processing)
 ```bash
 gcloud run deploy realtime-agent-worker \
@@ -129,8 +156,8 @@ gcloud run deploy realtime-agent-worker \
     --platform=managed \
     --memory=512Mi \
     --cpu=1 \
-    --set-env-vars="ROLE=worker,TEMPORAL_ADDRESS=YOUR_TEMPORAL_ADDRESS:7233" \
-    --set-secrets="GROQ_API_KEY=groq-api-key:latest" \
+    --set-env-vars="ROLE=worker,TEMPORAL_ADDRESS=YOUR_TEMPORAL_ADDRESS:7233,SENDER_EMAIL=alerts@example.com,RECIPIENT_EMAIL=oncall@example.com,SMTP_SERVER=smtp.example.com,SMTP_PORT=587" \
+    --set-secrets="GROQ_API_KEY=groq-api-key:latest,SENDER_PASSWORD=sender-email-password:latest" \
     --timeout=3600 \
     --min-instances=1
 ```
@@ -190,6 +217,25 @@ Expected response:
   "temporal_connected": true
 }
 ```
+
+### Optional: Configure Cloud Run to probe Groq (`/health/groq`)
+Add a short readiness/liveness probe that verifies the Groq API from the running container — useful for early detection of network/secret failures.
+
+- Route added by the app: `GET /health/groq` (returns 200 when Groq returns `pong` quickly).
+
+- Configure via Cloud Console: Cloud Run → select service → Revisions → Edit & Deploy → Containers → Health checks → set **Path** = `/health/groq`, **Timeout** = `3s`, **Period** = `10s`.
+
+- Configure via gcloud (replace placeholders):
+
+```bash
+gcloud run services update realtime-agent-api \
+  --region=$REGION \
+  --readiness-probe-path=/health/groq \
+  --readiness-probe-timeout=3s \
+  --readiness-probe-period=10s
+```
+
+After applying, Cloud Run will route traffic to the container only when the probe succeeds and will mark the revision as unhealthy if the probe fails repeatedly.
 
 ### Trigger workflow
 ```bash

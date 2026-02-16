@@ -198,6 +198,38 @@ The API also provides:
 - `/api/v1/batch-analyze` — Analyze multiple logs
 - `/health` — Health check endpoint
 
+SMTP / Email configuration (for `notifier_activity`)
+
+- Environment variables used by the email notifier:
+  - `SENDER_EMAIL` — sender address (e.g. alerts@example.com)
+  - `SENDER_PASSWORD` — SMTP account password (sensitive; store in Secret Manager for Cloud Run)
+  - `RECIPIENT_EMAIL` — recipient address for alerts
+  - `SMTP_SERVER` — SMTP host (e.g. `smtp.gmail.com`)
+  - `SMTP_PORT` — SMTP port (e.g. `587`)
+
+- Local development: copy ` .env.example ` → ` .env ` and fill the SMTP values.
+
+- Cloud Run (recommended): store `SENDER_PASSWORD` in Secret Manager and pass other vars via `--set-env-vars`.
+
+Example (Cloud Run):
+
+```bash
+# store SMTP password securely
+echo -n "your-smtp-password" | gcloud secrets create sender-email-password --data-file=-
+
+# deploy worker with SMTP + Groq secrets
+gcloud run deploy realtime-agent-worker \
+  --image=${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${IMAGE_NAME}:latest \
+  --region=$REGION \
+  --platform=managed \
+  --memory=512Mi \
+  --cpu=1 \
+  --set-env-vars="ROLE=worker,TEMPORAL_ADDRESS=YOUR_TEMPORAL_ADDRESS:7233,SENDER_EMAIL=alerts@example.com,RECIPIENT_EMAIL=oncall@example.com,SMTP_SERVER=smtp.example.com,SMTP_PORT=587" \
+  --set-secrets="SENDER_PASSWORD=sender-email-password:latest,GROQ_API_KEY=groq-api-key:latest" \
+  --timeout=3600 \
+  --min-instances=1
+```
+
 ---
 
 ### 6️⃣ Observe Results

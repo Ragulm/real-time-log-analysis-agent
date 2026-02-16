@@ -7,6 +7,8 @@ services:
       POSTGRES_DB: temporal
     ports:
       - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
   temporal:
     image: temporalio/auto-setup:1.22
@@ -20,6 +22,12 @@ services:
       - POSTGRES_SEEDS=postgresql
     ports:
       - "7233:7233"
+    healthcheck:
+      test: ["CMD-SHELL", "tctl --address 127.0.0.1:7233 namespace list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   temporal-ui:
     image: temporalio/ui:2.25.0
@@ -30,26 +38,44 @@ services:
     ports:
       - "8233:8080"
 
+  temporal-init:
+    image: temporalio/auto-setup:1.22
+    depends_on:
+      - temporal
+    entrypoint: /bin/sh -c "for i in $(seq 1 30); do tctl --address temporal:7233 namespace describe default >/dev/null 2>&1 && echo 'namespace exists' && exit 0 || (tctl --address temporal:7233 namespace register --retention 24h default && echo 'registered' && exit 0); sleep 1; done; echo 'namespace bootstrap failed' && exit 1"
+    restart: "no"
+
   # Local application services for convenience
   app-worker:
     build: .
     image: realtime-agent:local
     depends_on:
       - temporal
+    env_file:
+      - .env
     environment:
       - ROLE=worker
       - TEMPORAL_ADDRESS=temporal:7233
+      - PORT=8080
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health').status==200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
   app-streamer:
     build: .
     image: realtime-agent:local
     depends_on:
       - temporal
+    env_file:
+      - .env
     environment:
       - ROLE=streamer
       - TEMPORAL_ADDRESS=temporal:7233
     volumes:
-      - ./temporal_app/app.log:/app/temporal_app/app.log:rw
+      - ./app.log:/app/app.log:rw
     tty: true
 
   app-api:
@@ -57,9 +83,20 @@ services:
     image: realtime-agent:local
     depends_on:
       - temporal
+    env_file:
+      - .env
     environment:
       - ROLE=api
       - TEMPORAL_ADDRESS=temporal:7233
       - PORT=8000
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  postgres_data:

@@ -1,5 +1,6 @@
 import os
 import asyncio
+import uuid
 from temporalio.client import Client
 
 from agents.collector import LogCollector
@@ -31,12 +32,16 @@ async def main():
         if "ERROR" in line or "CRITICAL" in line:
             print("🚨 Error detected → starting workflow")
 
-            await client.start_workflow(
-                LogWorkflow.run,
-                line,
-                id=f"log-{hash(line)}",
-                task_queue="log-task-queue",
-            )
+            try:
+                wf = await client.start_workflow(
+                    LogWorkflow.run,
+                    line,
+                    id=f"log-{uuid.uuid4().hex}",
+                    task_queue="log-task-queue",
+                )
+                print(f"✅ Streamer started workflow: {wf.id}")
+            except Exception as e:
+                print(f"⚠️  Streamer failed to start workflow: {e}")
 
 
 if __name__ == "__main__":

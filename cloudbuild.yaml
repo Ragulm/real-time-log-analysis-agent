@@ -1,0 +1,172 @@
+# Cloud Build configuration for Real-Time Log Analysis Agent
+# Builds and pushes worker, API, and streamer images to Artifact Registry
+# Usage: gcloud builds submit --config=cloudbuild.yaml
+
+steps:
+  # Step 1: Build the worker image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-worker
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:worker-$BUILD_ID'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:worker-latest'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+    waitFor: ['-']
+
+  # Step 2: Build the API image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-api
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:api-$BUILD_ID'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:api-latest'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+    waitFor: ['build-worker']
+
+  # Step 3: Build the streamer image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-streamer
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:streamer-$BUILD_ID'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:streamer-latest'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+    waitFor: ['build-api']
+
+  # Step 4: Push all images to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-images
+    args:
+      - 'push'
+      - '--all-tags'
+      - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent'
+    waitFor: ['build-streamer']
+
+  # Step 5: Deploy worker to Cloud Run
+  - name: 'gcr.io/cloud-builders/gke-deploy'
+    id: deploy-worker
+    args:
+      - 'run'
+      - 'deploy'
+      - 'realtime-agent-worker'
+      - '--image=us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:worker-$BUILD_ID'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--set-env-vars'
+      - 'ROLE=worker,TEMPORAL_ADDRESS=temporal.example.com:7233,GROQ_API_KEY=${GROQ_API_KEY}'
+      - '--allow-unauthenticated'
+    env:
+      - 'GROQ_API_KEY=${GROQ_API_KEY}'
+    waitFor: ['push-images']
+
+  # Step 6: Deploy API to Cloud Run
+  - name: 'gcr.io/cloud-builders/gke-deploy'
+    id: deploy-api
+    args:
+      - 'run'
+      - 'deploy'
+      - 'realtime-agent-api'
+      - '--image=us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:api-$BUILD_ID'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--set-env-vars'
+      - 'ROLE=api,TEMPORAL_ADDRESS=temporal.example.com:7233,GROQ_API_KEY=${GROQ_API_KEY}'
+      - '--allow-unauthenticated'
+    env:
+      - 'GROQ_API_KEY=${GROQ_API_KEY}'
+    waitFor: ['push-images']
+
+  # --------------------------
+  # Smoke tests (validate Groq + basic workflow)
+  # Fails the build if Groq health or a sample workflow doesn't succeed.
+  # --------------------------
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:slim'
+    id: smoke-groq
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        apt-get update -y >/dev/null
+        apt-get install -y -qq curl jq >/dev/null
+        API_URL=$(gcloud run services describe realtime-agent-api --region=us-central1 --format="value(status.url)")
+        echo "API_URL=${API_URL}"
+        # try a few times since the revision may still be warming
+        for i in 1 2 3; do
+          resp=$(curl -sS -m 5 "${API_URL}/health/groq" || true)
+          echo "groq probe response: ${resp}"
+          ok=$(echo "${resp}" | jq -r '.ok // "false"')
+          if [ "${ok}" = "true" ]; then
+            echo "Groq probe OK"
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "Groq probe failed" >&2
+        exit 1
+    waitFor: ['deploy-api']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:slim'
+    id: smoke-workflow
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        apt-get update -y >/dev/null
+        apt-get install -y -qq curl jq >/dev/null
+        API_URL=$(gcloud run services describe realtime-agent-api --region=us-central1 --format="value(status.url)")
+        echo "Triggering workflow at ${API_URL}/api/v1/analyze-log"
+        resp=$(curl -sS -X POST "${API_URL}/api/v1/analyze-log" -H 'Content-Type: application/json' -d '{"log_line":"SMOKE TEST - connectivity check"}')
+        echo "trigger response: ${resp}"
+        wid=$(echo "${resp}" | jq -r '.workflow_id // ""')
+        if [ -z "${wid}" ]; then
+          echo "No workflow_id returned" >&2
+          exit 1
+        fi
+        echo "workflow id: ${wid}"
+        deadline=$((SECONDS+60))
+        while [ $SECONDS -lt $deadline ]; do
+          wr=$(curl -sS "${API_URL}/api/v1/workflow/${wid}" || true)
+          st=$(echo "${wr}" | jq -r '.status // ""')
+          echo "poll status: ${st}"
+          if [ -n "${st}" ] && [ "${st}" != "started" ]; then
+            if [ "${st}" = "completed" ] || [ "${st}" = "simulated" ]; then
+              echo "Workflow smoke test succeeded: ${st}"
+              exit 0
+            fi
+            echo "Workflow finished with status ${st}" >&2
+            echo "${wr}" >&2
+            exit 1
+          fi
+          sleep 3
+        done
+        echo "Workflow smoke timed out" >&2
+        exit 1
+    waitFor: ['deploy-api']
+
+images:
+  - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:worker-$BUILD_ID'
+  - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:worker-latest'
+  - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:api-$BUILD_ID'
+  - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:api-latest'
+  - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:streamer-$BUILD_ID'
+  - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:streamer-latest'
+
+options:
+  machineType: 'N1_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+  
+timeout: '1800s'

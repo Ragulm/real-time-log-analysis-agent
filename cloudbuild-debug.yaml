@@ -1,0 +1,31 @@
+# Debug Cloud Build configuration - just build and push, no deployment
+# This helps identify any docker build failures
+
+steps:
+  # Step 1: Build the worker image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-worker
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:debug-$BUILD_ID'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+
+  # Step 2: Push the image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-worker
+    args:
+      - 'push'
+      - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:debug-$BUILD_ID'
+    waitFor: ['build-worker']
+
+images:
+  - 'us-central1-docker.pkg.dev/project-294f73a2-90e4-4430-b84/realtime-agent-repo/realtime-agent:debug-$BUILD_ID'
+
+options:
+  machineType: 'N1_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: '900s'
